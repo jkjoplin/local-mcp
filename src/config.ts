@@ -28,6 +28,7 @@ export interface ConfigFile {
   routing: Record<TaskType, ModelTier>;
   dashboard: { port: number };
   tracking: { enabled: boolean; log_path: string };
+  templates?: Record<string, string>;
 }
 
 export interface Config {
@@ -142,6 +143,9 @@ export function updateConfigFile(updates: Partial<ConfigFile>): ConfigFile {
     tracking: updates.tracking
       ? { ...current.tracking, ...updates.tracking }
       : current.tracking,
+    templates: updates.templates
+      ? { ...(current.templates ?? {}), ...updates.templates }
+      : current.templates,
   };
   saveConfigFile(merged);
   return merged;

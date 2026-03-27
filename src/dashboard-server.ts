@@ -4,8 +4,10 @@ import { join, extname } from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { Config, getConfigFile, updateConfigFile, ConfigFile } from "./config.js";
+import { Config, getConfigFile, updateConfigFile, ConfigFile, ModelTier } from "./config.js";
 import { readLogs, getStats } from "./tracking.js";
+import { chatCompletion } from "./models.js";
+import { loadTemplates, DEFAULT_TEMPLATES } from "./templates.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,6 +88,30 @@ const MODEL_LIBRARY = [
   },
 ];
 
+const VALID_TOOLS = [
+  "ask_local",
+  "reason",
+  "classify",
+  "summarize",
+  "code_review",
+  "explain",
+  "extract",
+  "translate",
+  "diff_analysis",
+];
+
+const TOOL_TIER_MAP: Record<string, string> = {
+  ask_local: "ask",
+  reason: "reason",
+  classify: "classify",
+  summarize: "summarize",
+  code_review: "code_review",
+  explain: "explain",
+  extract: "extract",
+  translate: "translate",
+  diff_analysis: "diff_analysis",
+};
+
 async function checkEndpointHealth(
   url: string,
 ): Promise<{ healthy: boolean; latencyMs: number }> {
@@ -139,6 +165,84 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(data));
+}
+
+function buildTestMessages(
+  tool: string,
+  input: string,
+): { messages: Array<{ role: "system" | "user"; content: string }>; tier: string } {
+  const tierKey = TOOL_TIER_MAP[tool] ?? "ask";
+  switch (tool) {
+    case "reason":
+      return {
+        messages: [
+          { role: "system", content: "Think step by step. Be thorough and precise in your reasoning." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "classify":
+      return {
+        messages: [
+          { role: "system", content: "Classify the following text. Respond with ONLY a JSON object: {\"result\": \"category\", \"confidence\": \"high|medium|low\"}" },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "summarize":
+      return {
+        messages: [
+          { role: "system", content: "Summarize the following text in a concise paragraph. Respond with only the summary." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "code_review":
+      return {
+        messages: [
+          { role: "system", content: "You are an expert code reviewer. Review the following code for bugs, performance, and style. Provide specific, actionable feedback." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "explain":
+      return {
+        messages: [
+          { role: "system", content: "Explain the following clearly for an intermediate-level audience. Be concise but thorough." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "extract":
+      return {
+        messages: [
+          { role: "system", content: "Extract structured data from the following text. Output ONLY valid JSON." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "translate":
+      return {
+        messages: [
+          { role: "system", content: "Translate the following text. Output only the translation." },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    case "diff_analysis":
+      return {
+        messages: [
+          { role: "system", content: "Analyze this git diff. Respond with ONLY a JSON object: {\"summary\": \"...\", \"risks\": [...], \"suggestions\": [...]}" },
+          { role: "user", content: input },
+        ],
+        tier: tierKey,
+      };
+    default:
+      return {
+        messages: [{ role: "user", content: input }],
+        tier: tierKey,
+      };
+  }
 }
 
 export function startDashboard(config: Config): void {
@@ -202,6 +306,47 @@ export function startDashboard(config: Config): void {
 
         if (url === "/api/stats" && method === "GET") {
           return json(res, getStats(config.tracking.logPath));
+        }
+
+        if (url === "/api/templates" && method === "GET") {
+          return json(res, {
+            templates: loadTemplates(),
+            defaults: DEFAULT_TEMPLATES,
+          });
+        }
+
+        if (url === "/api/templates" && method === "POST") {
+          const body = await readBody(req);
+          const { templates } = JSON.parse(body) as { templates: Record<string, string> };
+          updateConfigFile({ templates } as unknown as Partial<ConfigFile>);
+          return json(res, { ok: true });
+        }
+
+        if (url === "/api/test" && method === "POST") {
+          const body = await readBody(req);
+          const { tool, input } = JSON.parse(body) as { tool: string; input: string };
+
+          if (!VALID_TOOLS.includes(tool)) {
+            return json(res, { error: `Invalid tool: ${tool}` }, 400);
+          }
+          if (!input || !input.trim()) {
+            return json(res, { error: "Input is required" }, 400);
+          }
+
+          const { messages, tier: tierKey } = buildTestMessages(tool, input);
+          const tier: ModelTier =
+            (config.routing as Record<string, ModelTier>)[tierKey] ?? "smart";
+          const model = tier === "smart" ? config.smartModel : config.fastModel;
+
+          const start = Date.now();
+          try {
+            const result = await chatCompletion(config, tier, messages, tool);
+            const latency = Date.now() - start;
+            return json(res, { result, latency, model, tool, tokens: Math.ceil(result.length / 4) });
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json(res, { error: message, tool, model }, 500);
+          }
         }
 
         return json(res, { error: "Not found" }, 404);

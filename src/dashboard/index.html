@@ -11,13 +11,14 @@
     <nav class="sidebar">
       <div class="logo">
         <h1><span>local</span>-mcp</h1>
-        <p>v2.0 — Local AI Router</p>
+        <p>v3.0 — Local AI Router</p>
       </div>
       <div class="nav-item active" data-page="status">● Status</div>
       <div class="nav-item" data-page="models">◆ Models</div>
       <div class="nav-item" data-page="routing">⇄ Routing</div>
       <div class="nav-item" data-page="wizard">⚡ Setup Wizard</div>
       <div class="nav-item" data-page="logs">▤ Logs</div>
+      <div class="nav-item" data-page="templates">✎ Templates</div>
     </nav>
 
     <div class="main">
@@ -33,6 +34,47 @@
           <div class="stat-box"><div class="value" id="stat-saved">—</div><div class="label">Est. Cost Saved</div></div>
         </div>
         <div id="endpoints-container"></div>
+
+        <!-- Health Sparklines -->
+        <div class="card" id="sparkline-card" style="margin-top:16px;">
+          <div class="card-header"><h2>Latency History</h2><span style="color:var(--text-muted);font-size:12px;">Last 20 checks (auto-refresh 10s)</span></div>
+          <div class="sparkline-row">
+            <div class="sparkline-box">
+              <div class="sparkline-label">SMART</div>
+              <svg id="sparkline-smart" width="100%" height="50" viewBox="0 0 200 50" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="sparkline-box">
+              <div class="sparkline-label">FAST</div>
+              <svg id="sparkline-fast" width="100%" height="50" viewBox="0 0 200 50" preserveAspectRatio="none"></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Test Panel -->
+        <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h2>Quick Test</h2></div>
+          <div class="quick-test">
+            <div class="quick-test-row">
+              <select id="test-tool">
+                <option value="ask_local">ask_local</option>
+                <option value="reason">reason</option>
+                <option value="classify">classify</option>
+                <option value="summarize">summarize</option>
+                <option value="code_review">code_review</option>
+                <option value="explain">explain</option>
+                <option value="extract">extract</option>
+                <option value="translate">translate</option>
+                <option value="diff_analysis">diff_analysis</option>
+              </select>
+              <button class="btn primary" id="test-run">Run</button>
+            </div>
+            <textarea id="test-input" rows="3" placeholder="Enter your prompt or input..."></textarea>
+            <div id="test-output" class="test-output" style="display:none;">
+              <div id="test-meta" class="test-meta"></div>
+              <pre id="test-result"></pre>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- MODELS PAGE -->
@@ -55,7 +97,8 @@
             <thead><tr><th>Task</th><th>Model Tier</th><th>Description</th></tr></thead>
             <tbody id="routing-body"></tbody>
           </table>
-          <div style="margin-top: 16px; text-align: right;">
+          <div style="margin-top: 16px; display:flex; justify-content:space-between; align-items:center;">
+            <button class="btn" id="export-config">Export Config</button>
             <button class="btn primary" id="save-routing">Save Configuration</button>
           </div>
         </div>
@@ -117,6 +160,39 @@ export LOCAL_MCP_SMART_URL=http://localhost:8081<button class="btn sm copy-btn" 
           </table>
           <div id="log-empty" style="text-align:center;padding:40px;color:var(--text-muted);display:none;">No requests logged yet</div>
         </div>
+      </div>
+
+      <!-- TEMPLATES PAGE -->
+      <div class="page" id="page-templates">
+        <div class="section-header">
+          <h1>Prompt Templates</h1>
+          <p>Customize how each tool formats requests to the model</p>
+        </div>
+        <div id="templates-container"></div>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn" id="reset-templates">Reset to Defaults</button>
+          <button class="btn primary" id="save-templates">Save Templates</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Config Modal -->
+  <div class="modal-overlay" id="export-modal" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Export Configuration</h2>
+        <button class="btn sm" id="close-modal">&times;</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-format="claude">Claude Code</button>
+        <button class="modal-tab" data-format="codex">Codex</button>
+        <button class="modal-tab" data-format="cursor">Cursor</button>
+        <button class="modal-tab" data-format="generic">Generic</button>
+      </div>
+      <pre class="modal-code" id="export-code"></pre>
+      <div style="text-align:right;margin-top:12px;">
+        <button class="btn primary" id="copy-export">Copy</button>
       </div>
     </div>
   </div>
