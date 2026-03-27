@@ -1,8 +1,10 @@
-/* local-mcp Dashboard — Client */
+/* local-mcp Dashboard — Client v3 */
 
 const API = '';
 let currentConfig = null;
 let models = [];
+let healthHistory = { smart: [], fast: [] };
+let defaultTemplates = {};
 
 // --- Navigation ---
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -15,6 +17,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
     if (item.dataset.page === 'logs') refreshLogs();
     if (item.dataset.page === 'models') refreshModels();
     if (item.dataset.page === 'routing') refreshRouting();
+    if (item.dataset.page === 'templates') refreshTemplates();
   });
 });
 
@@ -39,6 +42,69 @@ document.addEventListener('click', e => {
     });
   }
 });
+
+// --- Sparkline ---
+function drawSparkline(svgId, values) {
+  const svg = document.getElementById(svgId);
+  if (!svg || values.length === 0) return;
+  svg.innerHTML = '';
+
+  const max = Math.max(...values, 1);
+  const w = 200;
+  const h = 50;
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+
+  const points = values.map((v, i) => {
+    const x = i * step;
+    const y = h - (v / max) * (h - 4) - 2;
+    return `${x},${y}`;
+  }).join(' ');
+
+  // Determine color based on latest value
+  const latest = values[values.length - 1];
+  let color = '#3fb950'; // green
+  if (latest > 500) color = '#f85149'; // red
+  else if (latest > 100) color = '#d29922'; // yellow
+
+  // Fill area
+  const fillPoints = `0,${h} ${points} ${w},${h}`;
+  const fill = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  fill.setAttribute('points', fillPoints);
+  fill.setAttribute('fill', color);
+  fill.setAttribute('fill-opacity', '0.15');
+  svg.appendChild(fill);
+
+  // Line
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  line.setAttribute('points', points);
+  line.setAttribute('fill', 'none');
+  line.setAttribute('stroke', color);
+  line.setAttribute('stroke-width', '2');
+  svg.appendChild(line);
+
+  // Dot on latest
+  if (values.length > 0) {
+    const lastX = (values.length - 1) * step;
+    const lastY = h - (latest / max) * (h - 4) - 2;
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', lastX);
+    dot.setAttribute('cy', lastY);
+    dot.setAttribute('r', '3');
+    dot.setAttribute('fill', color);
+    svg.appendChild(dot);
+  }
+
+  // Label latest value
+  const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  label.setAttribute('x', '196');
+  label.setAttribute('y', '12');
+  label.setAttribute('fill', color);
+  label.setAttribute('font-size', '10');
+  label.setAttribute('text-anchor', 'end');
+  label.setAttribute('font-family', 'monospace');
+  label.textContent = latest + 'ms';
+  svg.appendChild(label);
+}
 
 // --- Status Page ---
 async function refreshStatus() {
@@ -69,12 +135,62 @@ async function refreshStatus() {
           <div class="latency">${d.healthy ? d.latencyMs + 'ms' : 'offline'}</div>
         </div>
       `;
+
+      // Track latency history
+      if (healthHistory[tier]) {
+        healthHistory[tier].push(d.healthy ? d.latencyMs : 0);
+        if (healthHistory[tier].length > 20) healthHistory[tier].shift();
+      }
     }
+
+    // Update sparklines
+    drawSparkline('sparkline-smart', healthHistory.smart.filter(v => v > 0));
+    drawSparkline('sparkline-fast', healthHistory.fast.filter(v => v > 0));
   } catch {
     document.getElementById('endpoints-container').innerHTML =
       '<div class="card" style="color:var(--danger)">Failed to fetch status</div>';
   }
 }
+
+// --- Quick Test ---
+document.getElementById('test-run').addEventListener('click', async () => {
+  const tool = document.getElementById('test-tool').value;
+  const input = document.getElementById('test-input').value.trim();
+  if (!input) { toast('Enter some input first'); return; }
+
+  const btn = document.getElementById('test-run');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  document.getElementById('test-output').style.display = 'none';
+
+  try {
+    const res = await fetch(API + '/api/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool, input })
+    });
+    const data = await res.json();
+    document.getElementById('test-output').style.display = 'block';
+
+    if (data.error) {
+      document.getElementById('test-meta').innerHTML = `<span style="color:var(--danger)">Error</span>`;
+      document.getElementById('test-result').textContent = data.error;
+    } else {
+      document.getElementById('test-meta').innerHTML =
+        `<span class="badge speed">${data.latency}ms</span> ` +
+        `<span class="badge ram">${data.tokens} tokens</span> ` +
+        `<span class="badge tag">${data.model?.split('/').pop() || '—'}</span>`;
+      document.getElementById('test-result').textContent = data.result;
+    }
+  } catch (err) {
+    document.getElementById('test-output').style.display = 'block';
+    document.getElementById('test-meta').innerHTML = '<span style="color:var(--danger)">Request failed</span>';
+    document.getElementById('test-result').textContent = err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run';
+  }
+});
 
 // --- Models Page ---
 async function refreshModels() {
@@ -152,6 +268,143 @@ document.getElementById('save-routing').addEventListener('click', async () => {
   } catch {
     toast('Failed to save configuration');
   }
+});
+
+// --- Export Config ---
+const EXPORT_FORMATS = {
+  claude: () => JSON.stringify({
+    mcpServers: {
+      "local-mcp": {
+        command: "npx",
+        args: ["local-mcp", "serve"]
+      }
+    }
+  }, null, 2),
+  codex: () => JSON.stringify({
+    mcpServers: {
+      "local-mcp": {
+        type: "stdio",
+        command: "npx",
+        args: ["local-mcp", "serve"]
+      }
+    }
+  }, null, 2),
+  cursor: () => JSON.stringify({
+    mcpServers: {
+      "local-mcp": {
+        command: "npx",
+        args: ["local-mcp", "serve"],
+        disabled: false
+      }
+    }
+  }, null, 2),
+  generic: () => JSON.stringify({
+    name: "local-mcp",
+    transport: "stdio",
+    command: "npx",
+    args: ["local-mcp", "serve"],
+    description: "Local LLM MCP server — route AI tasks to your own hardware"
+  }, null, 2)
+};
+
+document.getElementById('export-config').addEventListener('click', () => {
+  const modal = document.getElementById('export-modal');
+  modal.style.display = 'flex';
+  showExportFormat('claude');
+});
+
+document.getElementById('close-modal').addEventListener('click', () => {
+  document.getElementById('export-modal').style.display = 'none';
+});
+
+document.getElementById('export-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+});
+
+document.querySelectorAll('.modal-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    showExportFormat(tab.dataset.format);
+  });
+});
+
+function showExportFormat(format) {
+  const code = document.getElementById('export-code');
+  const fn = EXPORT_FORMATS[format];
+  if (fn) {
+    code.textContent = fn();
+    highlightJson(code);
+  }
+}
+
+function highlightJson(pre) {
+  const text = pre.textContent;
+  pre.innerHTML = text
+    .replace(/"([^"]+)"(?=\s*:)/g, '<span class="hl-key">"$1"</span>')
+    .replace(/:\s*"([^"]+)"/g, ': <span class="hl-str">"$1"</span>')
+    .replace(/:\s*(true|false|null)/g, ': <span class="hl-bool">$1</span>');
+}
+
+document.getElementById('copy-export').addEventListener('click', () => {
+  const text = document.getElementById('export-code').textContent;
+  navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard'));
+});
+
+// --- Templates ---
+const TEMPLATE_HINTS = {
+  code_review: '{language}, {focus}, {code}',
+  explain: '{level}, {content}',
+  classify: '{categories}, {text}',
+  summarize: '{format}, {max_words_hint}, {text}',
+  diff_analysis: '{context_hint}, {diff}',
+  extract: '{schema}, {text}'
+};
+
+async function refreshTemplates() {
+  try {
+    const res = await fetch(API + '/api/templates');
+    const data = await res.json();
+    defaultTemplates = data.defaults;
+    const container = document.getElementById('templates-container');
+    container.innerHTML = Object.entries(data.templates).map(([name, tmpl]) => `
+      <div class="card template-card">
+        <div class="template-header">
+          <code>${name}</code>
+          <span class="template-hint">${TEMPLATE_HINTS[name] || ''}</span>
+        </div>
+        <textarea class="template-textarea" data-template="${name}" rows="3">${tmpl}</textarea>
+      </div>
+    `).join('');
+  } catch {
+    document.getElementById('templates-container').innerHTML =
+      '<div class="card" style="color:var(--danger)">Failed to load templates</div>';
+  }
+}
+
+document.getElementById('save-templates').addEventListener('click', async () => {
+  const templates = {};
+  document.querySelectorAll('.template-textarea').forEach(ta => {
+    templates[ta.dataset.template] = ta.value;
+  });
+  try {
+    await fetch(API + '/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templates })
+    });
+    toast('Templates saved');
+  } catch {
+    toast('Failed to save templates');
+  }
+});
+
+document.getElementById('reset-templates').addEventListener('click', () => {
+  document.querySelectorAll('.template-textarea').forEach(ta => {
+    const name = ta.dataset.template;
+    if (defaultTemplates[name]) ta.value = defaultTemplates[name];
+  });
+  toast('Reset to defaults (save to persist)');
 });
 
 // --- Wizard ---
@@ -233,7 +486,6 @@ async function refreshLogs() {
 }
 
 // --- Auto-refresh ---
-// Auto-refresh intervals
 function startAutoRefresh() {
   refreshStatus();
   setInterval(() => {
