@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>local-mcp Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <nav class="sidebar">
+      <div class="logo">
+        <h1><span>local</span>-mcp</h1>
+        <p>v2.0 — Local AI Router</p>
+      </div>
+      <div class="nav-item active" data-page="status">● Status</div>
+      <div class="nav-item" data-page="models">◆ Models</div>
+      <div class="nav-item" data-page="routing">⇄ Routing</div>
+      <div class="nav-item" data-page="wizard">⚡ Setup Wizard</div>
+      <div class="nav-item" data-page="logs">▤ Logs</div>
+    </nav>
+
+    <div class="main">
+      <!-- STATUS PAGE -->
+      <div class="page active" id="page-status">
+        <div class="section-header">
+          <h1>Status</h1>
+          <p>Endpoint health and usage statistics</p>
+        </div>
+        <div class="stats-row" id="stats-row">
+          <div class="stat-box"><div class="value" id="stat-requests">—</div><div class="label">Total Requests</div></div>
+          <div class="stat-box"><div class="value" id="stat-tokens">—</div><div class="label">Total Tokens</div></div>
+          <div class="stat-box"><div class="value" id="stat-saved">—</div><div class="label">Est. Cost Saved</div></div>
+        </div>
+        <div id="endpoints-container"></div>
+      </div>
+
+      <!-- MODELS PAGE -->
+      <div class="page" id="page-models">
+        <div class="section-header">
+          <h1>Model Library</h1>
+          <p>Recommended MLX models for Apple Silicon</p>
+        </div>
+        <div class="model-grid" id="model-grid"></div>
+      </div>
+
+      <!-- ROUTING PAGE -->
+      <div class="page" id="page-routing">
+        <div class="section-header">
+          <h1>Task Routing</h1>
+          <p>Configure which model tier handles each task type</p>
+        </div>
+        <div class="card">
+          <table class="routing-table">
+            <thead><tr><th>Task</th><th>Model Tier</th><th>Description</th></tr></thead>
+            <tbody id="routing-body"></tbody>
+          </table>
+          <div style="margin-top: 16px; text-align: right;">
+            <button class="btn primary" id="save-routing">Save Configuration</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WIZARD PAGE -->
+      <div class="page" id="page-wizard">
+        <div class="section-header">
+          <h1>Setup Wizard</h1>
+          <p>Get MLX models running locally in minutes</p>
+        </div>
+        <div class="wizard-steps" id="wizard-steps">
+          <div class="wizard-step" id="step-1">
+            <h3>Check Prerequisites</h3>
+            <p>Verify Python and MLX are available on your system.</p>
+            <button class="btn" id="check-prereqs">Run Check</button>
+            <div id="prereq-results" style="margin-top: 10px;"></div>
+          </div>
+          <div class="wizard-step" id="step-2">
+            <h3>Install MLX</h3>
+            <p>Install the MLX language model framework.</p>
+            <div class="code-block">pip install mlx-lm<button class="btn sm copy-btn" data-copy="pip install mlx-lm">Copy</button></div>
+          </div>
+          <div class="wizard-step" id="step-3">
+            <h3>Download a Model</h3>
+            <p>Pick a model from the library and download it.</p>
+            <select id="wizard-model-select" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:13px;width:100%;margin-bottom:8px;"></select>
+            <div class="code-block" id="wizard-download-cmd">huggingface-cli download mlx-community/Qwen2.5-1.5B-Instruct-4bit<button class="btn sm copy-btn" data-copy="">Copy</button></div>
+          </div>
+          <div class="wizard-step" id="step-4">
+            <h3>Start MLX Server</h3>
+            <p>Launch the model as an OpenAI-compatible server.</p>
+            <div class="code-block" id="wizard-serve-cmd">python3 -m mlx_lm.server --model mlx-community/Qwen2.5-1.5B-Instruct-4bit --port 8083<button class="btn sm copy-btn" data-copy="">Copy</button></div>
+          </div>
+          <div class="wizard-step" id="step-5">
+            <h3>Configure local-mcp</h3>
+            <p>Set environment variables or edit <code>~/.local-mcp/config.json</code>.</p>
+            <div class="code-block">export LOCAL_MCP_FAST_URL=http://localhost:8083
+export LOCAL_MCP_SMART_URL=http://localhost:8081<button class="btn sm copy-btn" data-copy="export LOCAL_MCP_FAST_URL=http://localhost:8083&#10;export LOCAL_MCP_SMART_URL=http://localhost:8081">Copy</button></div>
+          </div>
+          <div class="wizard-step" id="step-6">
+            <h3>Add to Claude Code</h3>
+            <p>Register local-mcp as an MCP server.</p>
+            <div class="code-block">claude mcp add local-mcp -- npx local-mcp serve<button class="btn sm copy-btn" data-copy="claude mcp add local-mcp -- npx local-mcp serve">Copy</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOGS PAGE -->
+      <div class="page" id="page-logs">
+        <div class="section-header">
+          <h1>Request Logs</h1>
+          <p>Last 100 requests processed</p>
+        </div>
+        <div class="card" style="overflow-x:auto;">
+          <table class="log-table">
+            <thead><tr><th>Time</th><th>Tool</th><th>Model</th><th>Tokens</th><th>Latency</th><th>Status</th></tr></thead>
+            <tbody id="log-body"></tbody>
+          </table>
+          <div id="log-empty" style="text-align:center;padding:40px;color:var(--text-muted);display:none;">No requests logged yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

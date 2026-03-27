@@ -1,6 +1,5 @@
-import { Config } from "./config.js";
-
-export type ModelTier = "fast" | "smart";
+import { Config, ModelTier } from "./config.js";
+import { logRequest } from "./tracking.js";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -13,12 +12,20 @@ interface ChatCompletionResponse {
       content: string;
     };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
+
+export type { ModelTier };
 
 export async function chatCompletion(
   config: Config,
   tier: ModelTier,
   messages: ChatMessage[],
+  toolName?: string,
 ): Promise<string> {
   const baseUrl = tier === "smart" ? config.smartUrl : config.fastUrl;
   const model = tier === "smart" ? config.smartModel : config.fastModel;
@@ -26,6 +33,7 @@ export async function chatCompletion(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const startTime = Date.now();
 
   try {
     const response = await fetch(url, {
@@ -47,8 +55,37 @@ export async function chatCompletion(
     if (content === undefined || content === null) {
       throw new Error("No content in LLM response");
     }
+
+    const latencyMs = Date.now() - startTime;
+    const tokens = data.usage?.total_tokens ?? estimateTokens(messages, content);
+
+    if (config.tracking.enabled) {
+      logRequest({
+        timestamp: new Date().toISOString(),
+        tool: toolName ?? "unknown",
+        model,
+        tier,
+        tokens,
+        latencyMs,
+        status: "ok",
+      }, config.tracking.logPath);
+    }
+
     return content.trim();
   } catch (err: unknown) {
+    const latencyMs = Date.now() - startTime;
+    if (config.tracking.enabled) {
+      logRequest({
+        timestamp: new Date().toISOString(),
+        tool: toolName ?? "unknown",
+        model,
+        tier,
+        tokens: 0,
+        latencyMs,
+        status: "error",
+      }, config.tracking.logPath);
+    }
+
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error(
         `Request to ${tier} model timed out after ${config.timeoutMs}ms`,
@@ -67,4 +104,9 @@ export async function chatCompletion(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function estimateTokens(messages: ChatMessage[], response: string): number {
+  const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  return Math.ceil((inputChars + response.length) / 4);
 }
