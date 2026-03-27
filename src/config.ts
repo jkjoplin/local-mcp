@@ -29,6 +29,9 @@ export interface ConfigFile {
   dashboard: { port: number };
   tracking: { enabled: boolean; log_path: string };
   templates?: Record<string, string>;
+  meta?: {
+    updated_at?: string;
+  };
 }
 
 export interface Config {
@@ -46,7 +49,7 @@ export interface Config {
 const CONFIG_DIR = join(homedir(), ".local-mcp");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
-const DEFAULT_CONFIG_FILE: ConfigFile = {
+export const DEFAULT_CONFIG_FILE: ConfigFile = {
   endpoints: {
     smart: {
       url: "http://localhost:8081",
@@ -91,7 +94,14 @@ function loadConfigFile(): ConfigFile {
 
 export function saveConfigFile(cfg: ConfigFile): void {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+  const stamped: ConfigFile = {
+    ...cfg,
+    meta: {
+      ...(cfg.meta ?? {}),
+      updated_at: new Date().toISOString(),
+    },
+  };
+  writeFileSync(CONFIG_PATH, JSON.stringify(stamped, null, 2) + "\n", "utf-8");
 }
 
 export function loadConfig(): Config {
@@ -146,6 +156,9 @@ export function updateConfigFile(updates: Partial<ConfigFile>): ConfigFile {
     templates: updates.templates
       ? { ...(current.templates ?? {}), ...updates.templates }
       : current.templates,
+    meta: updates.meta
+      ? { ...(current.meta ?? {}), ...updates.meta }
+      : current.meta,
   };
   saveConfigFile(merged);
   return merged;

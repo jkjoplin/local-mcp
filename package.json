@@ -1,10 +1,12 @@
 {
   "name": "local-mcp",
-  "version": "2.0.0",
+  "version": "5.0.0",
   "description": "Local LLM MCP server with web dashboard — route AI tasks to your own hardware",
   "type": "module",
   "bin": {
-    "local-mcp": "./dist/index.js"
+    "local-mcp": "./dist/index.js",
+    "local-mcp-fit": "./dist/index.js",
+    "local-mcp-init": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

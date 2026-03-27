@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { ModelTier } from "./models.js";
 import { readLogs } from "./tracking.js";
 import { runBenchmark } from "./bench.js";
 import { detectHardware, FitLevel } from "./hardware.js";
+import { getConfigFile, saveConfigFile } from "./config.js";
 
 const config = loadConfig();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 function usage(): void {
   console.log(`\x1b[36mlocal-mcp\x1b[0m — Local LLM router
@@ -17,6 +22,7 @@ function usage(): void {
   local-mcp ask --reason "problem"      Reasoning mode
   local-mcp bench                       Run benchmark suite
   local-mcp fit                         Scan hardware and score curated models
+  local-mcp init                        Detect hardware and write a starter config
   local-mcp status                      Print endpoint health
   local-mcp logs                        Tail the request log
   local-mcp dashboard                   Start web dashboard
@@ -84,23 +90,53 @@ async function askCommand(args: string[]): Promise<void> {
     if (contentType.includes("text/event-stream") && res.body) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = "";
+      let sawDone = false;
+
+      const flushLines = (): void => {
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) {
+            continue;
+          }
+
+          const payload = line.slice(6).trim();
+          if (payload === "[DONE]") {
+            sawDone = true;
+            continue;
+          }
+
+          try {
+            const data = JSON.parse(payload) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              process.stdout.write(content);
+            }
+          } catch {
+            // Skip malformed chunks
+          }
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split("\n")) {
-          if (line.startsWith("data: ") && !line.includes("[DONE]")) {
-            try {
-              const data = JSON.parse(line.slice(6)) as {
-                choices?: Array<{ delta?: { content?: string } }>;
-              };
-              const content = data.choices?.[0]?.delta?.content;
-              if (content) process.stdout.write(content);
-            } catch {
-              // skip
-            }
-          }
+        buffer += decoder.decode(value, { stream: true });
+        flushLines();
+      }
+      buffer += decoder.decode();
+      flushLines();
+      if (!sawDone && buffer.trim()) {
+        const data = JSON.parse(buffer) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = data.choices?.[0]?.message?.content ?? "";
+        if (content) {
+          process.stdout.write(content.trim());
         }
       }
       process.stdout.write("\n");
@@ -133,6 +169,48 @@ async function askCommand(args: string[]): Promise<void> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function getServerEntryPath(): string {
+  const builtPath = join(__dirname, "index.js");
+  return builtPath;
+}
+
+async function initCommand(): Promise<void> {
+  const hardware = detectHardware();
+  printFitTable(hardware);
+
+  const current = getConfigFile();
+  const nextConfig = {
+    ...current,
+    endpoints: {
+      smart: {
+        url: "http://localhost:8081",
+        model: hardware.recommended.smart ?? current.endpoints.smart.model,
+      },
+      fast: {
+        url: "http://localhost:8083",
+        model: hardware.recommended.fast ?? current.endpoints.fast.model,
+      },
+    },
+  };
+
+  saveConfigFile(nextConfig);
+
+  const serverPath = getServerEntryPath();
+  const smartModel = nextConfig.endpoints.smart.model;
+  const fastModel = nextConfig.endpoints.fast.model;
+
+  console.log("\nWrote ~/.local-mcp/config.json with recommended endpoints:");
+  console.log(`  smart -> ${smartModel} @ ${nextConfig.endpoints.smart.url}`);
+  console.log(`  fast  -> ${fastModel} @ ${nextConfig.endpoints.fast.url}`);
+
+  console.log("\nStart these MLX servers:");
+  console.log(`  python3 -m mlx_lm.server --model ${smartModel} --port 8081`);
+  console.log(`  python3 -m mlx_lm.server --model ${fastModel} --port 8083`);
+
+  console.log("\nRegister with Claude Code:");
+  console.log(`  claude mcp add local-mcp -- node ${serverPath} serve`);
 }
 
 async function statusCommand(): Promise<void> {
@@ -203,8 +281,7 @@ function pad(value: string, width: number): string {
   return value.length >= width ? value.slice(0, width) : value + " ".repeat(width - value.length);
 }
 
-function printFitTable(): void {
-  const hardware = detectHardware();
+function printFitTable(hardware = detectHardware()): void {
   const widths = [42, 7, 8, 14, 7];
   const topWidth = 77;
   const topLine = `local-mcp fit — Hardware: ${hardware.cpu}  |  RAM: ${hardware.totalRamGB} GB  |  Free: ${hardware.freeRamGB} GB`;
@@ -268,6 +345,9 @@ export async function runCli(args: string[]): Promise<boolean> {
     case "fit":
       printFitTable();
       return true;
+    case "init":
+      await initCommand();
+      return true;
     case "status":
       await statusCommand();
       return true;
@@ -281,5 +361,13 @@ export async function runCli(args: string[]): Promise<boolean> {
       return true;
     default:
       return false;
+  }
+}
+
+if (process.argv[1] === __filename) {
+  const handled = await runCli(process.argv.slice(2));
+  if (!handled) {
+    usage();
+    process.exit(1);
   }
 }

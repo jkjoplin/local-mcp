@@ -232,6 +232,38 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 .routing-table select:focus { border-color: var(--accent); outline: none; }
+.routing-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.routing-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.routing-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.routing-tier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+  min-width: 78px;
+}
+
+.routing-health {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 .quick-test,
 .hardware-grid,
@@ -618,5 +650,10 @@ a:hover { text-decoration: underline; }
     margin-left: 0;
     max-width: none;
     padding: 20px;
+  }
+
+  .routing-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

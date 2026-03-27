@@ -4,7 +4,13 @@ import { join, extname } from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { Config, getConfigFile, updateConfigFile, ConfigFile } from "./config.js";
+import {
+  Config,
+  getConfigFile,
+  updateConfigFile,
+  ConfigFile,
+  DEFAULT_CONFIG_FILE,
+} from "./config.js";
 import { readLogs, getStats } from "./tracking.js";
 import { loadTemplates, DEFAULT_TEMPLATES } from "./templates.js";
 import { CURATED_MODELS, detectHardware } from "./hardware.js";
@@ -161,7 +167,13 @@ export function startDashboard(config: Config): void {
         }
 
         if (url === "/api/config" && method === "GET") {
-          return json(res, getConfigFile());
+          const configFile = getConfigFile();
+          return json(res, {
+            config: configFile,
+            defaults: {
+              routing: DEFAULT_CONFIG_FILE.routing,
+            },
+          });
         }
 
         if (url === "/api/config" && method === "POST") {

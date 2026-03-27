@@ -1,12 +1,14 @@
-/* local-mcp Dashboard — Client v3 */
+/* local-mcp Dashboard — Client v5 */
 
 const API = '';
 let currentConfig = null;
 let models = [];
 let healthHistory = { smart: [], fast: [] };
 let defaultTemplates = {};
+let defaultRouting = {};
 let hardwareState = null;
 let exportFormats = {};
+let endpointStatus = null;
 
 // --- Navigation ---
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -117,6 +119,7 @@ async function refreshStatus() {
       fetch(API + '/api/stats')
     ]);
     const status = await statusRes.json();
+    endpointStatus = status;
     const stats = await statsRes.json();
 
     document.getElementById('stat-requests').textContent = stats.totalRequests.toLocaleString();
@@ -289,15 +292,32 @@ const TASK_DESCRIPTIONS = {
   diff_analysis: 'Git diff risk analysis'
 };
 
+function renderTierHealth(tier) {
+  const healthy = endpointStatus?.[tier]?.healthy;
+  return `
+    <span class="routing-tier">
+      <span class="dot ${healthy ? 'green' : 'red'}"></span>
+      <span class="routing-health">${healthy ? 'healthy' : 'down'}</span>
+    </span>
+  `;
+}
+
 async function refreshRouting() {
   try {
+    if (!endpointStatus) {
+      const statusRes = await fetch(API + '/api/status');
+      endpointStatus = await statusRes.json();
+    }
     const res = await fetch(API + '/api/config');
-    currentConfig = await res.json();
+    const payload = await res.json();
+    currentConfig = payload.config;
+    defaultRouting = payload.defaults?.routing || {};
     const body = document.getElementById('routing-body');
     body.innerHTML = Object.entries(currentConfig.routing).map(([task, tier]) => `
       <tr>
         <td><code>${task}</code></td>
         <td>
+          <span class="routing-health-slot">${renderTierHealth(tier)}</span>
           <select data-task="${task}">
             <option value="fast" ${tier === 'fast' ? 'selected' : ''}>⚡ Fast</option>
             <option value="smart" ${tier === 'smart' ? 'selected' : ''}>🧠 Smart</option>
@@ -306,8 +326,21 @@ async function refreshRouting() {
         <td style="color:var(--text-muted)">${TASK_DESCRIPTIONS[task] || ''}</td>
       </tr>
     `).join('');
+    const updatedAt = currentConfig.meta?.updated_at
+      ? new Date(currentConfig.meta.updated_at).toLocaleString()
+      : 'Never';
+    document.getElementById('routing-updated-at').textContent = `Last updated: ${updatedAt}`;
+    document.querySelectorAll('#routing-body select').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const slot = sel.closest('td')?.querySelector('.routing-health-slot');
+        if (slot) {
+          slot.innerHTML = renderTierHealth(sel.value);
+        }
+      });
+    });
   } catch {
     document.getElementById('routing-body').innerHTML = '<tr><td colspan="3" style="color:var(--danger)">Failed to load config</td></tr>';
+    document.getElementById('routing-updated-at').textContent = 'Last updated: unavailable';
   }
 }
 
@@ -323,8 +356,25 @@ document.getElementById('save-routing').addEventListener('click', async () => {
       body: JSON.stringify({ routing })
     });
     toast('Routing configuration saved');
+    await refreshStatus();
+    await refreshRouting();
   } catch {
     toast('Failed to save configuration');
+  }
+});
+
+document.getElementById('reset-routing').addEventListener('click', async () => {
+  try {
+    await fetch(API + '/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routing: defaultRouting })
+    });
+    await refreshStatus();
+    await refreshRouting();
+    toast('Routing reset to defaults');
+  } catch {
+    toast('Failed to reset routing');
   }
 });
 

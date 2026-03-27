@@ -8,10 +8,17 @@ import { startDashboard } from "./dashboard-server.js";
 import { runCli } from "./cli.js";
 
 const config = loadConfig();
-const command = process.argv[2] ?? "start";
+const invokedAs = process.argv[1]?.split("/").pop() ?? "local-mcp";
+const aliasCommand =
+  invokedAs === "local-mcp-fit"
+    ? "fit"
+    : invokedAs === "local-mcp-init"
+      ? "init"
+      : null;
+const command = aliasCommand ?? process.argv[2] ?? "start";
 
 // Try CLI commands first
-const handled = await runCli(process.argv.slice(2));
+const handled = await runCli(aliasCommand ? [aliasCommand] : process.argv.slice(2));
 if (handled) {
   process.exit(0);
 }
@@ -19,7 +26,7 @@ if (handled) {
 async function startMcp(): Promise<void> {
   const server = new McpServer({
     name: "local-mcp",
-    version: "3.0.0",
+    version: "5.0.0",
   });
   registerTools(server, config);
   const transport = new StdioServerTransport();

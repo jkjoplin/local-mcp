@@ -1,6 +1,11 @@
 import { execSync } from "node:child_process";
 import { platform } from "node:os";
 
+const SYSCTL = "/usr/sbin/sysctl";
+const SYSTEM_PROFILER = "/usr/sbin/system_profiler";
+const UNAME = "/usr/bin/uname";
+const VM_STAT = "/usr/bin/vm_stat";
+
 export type FitLevel = "perfect" | "good" | "marginal" | "too_large";
 export type ModelTierLabel = "fast" | "smart";
 
@@ -168,7 +173,7 @@ function parseLinuxMeminfo(text: string): { totalKB: number; freeKB: number } {
 
 function detectMemory(): { totalRamGB: number; freeRamGB: number } {
   if (platform() === "darwin") {
-    const vmStat = execSync("vm_stat", { encoding: "utf-8" });
+    const vmStat = execSync(VM_STAT, { encoding: "utf-8" });
     const { pageSize, values } = parseVmStatPages(vmStat);
     const totalPages =
       (values["Pages free"] ?? 0) +
@@ -180,9 +185,8 @@ function detectMemory(): { totalRamGB: number; freeRamGB: number } {
       (values["Pages occupied by compressor"] ?? 0);
     const freePages =
       (values["Pages free"] ?? 0) +
-      (values["Pages speculative"] ?? 0) +
       (values["Pages inactive"] ?? 0) +
-      (values["Pages purgeable"] ?? 0);
+      (values["Pages speculative"] ?? 0);
 
     return {
       totalRamGB: toGB(totalPages * pageSize),
@@ -201,24 +205,40 @@ function detectMemory(): { totalRamGB: number; freeRamGB: number } {
 function detectCpu(): { cpu: string; isAppleSilicon: boolean } {
   if (platform() === "darwin") {
     let cpu = "";
+
     try {
-      cpu = execSync("sysctl -n machdep.cpu.brand_string", {
+      const chip = execSync(`${SYSTEM_PROFILER} SPHardwareDataType | grep "Chip:"`, {
+        env: process.env,
         encoding: "utf-8",
         stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+        maxBuffer: 1024 * 1024 * 4,
+        shell: "/bin/zsh",
+      })
+        .replace(/^.*Chip:\s*/m, "")
+        .trim();
+      if (chip) {
+        cpu = chip;
+      }
     } catch {
-      cpu = execSync(
-        "system_profiler SPHardwareDataType | awk -F': ' '/Chip/ {print $2; exit} /Processor Name/ {print $2; exit}'",
-        {
+      // Fall through to sysctl checks
+    }
+
+    try {
+      if (!cpu) {
+        cpu = execSync(`${SYSCTL} -n machdep.cpu.brand_string`, {
+          env: process.env,
           encoding: "utf-8",
           stdio: ["ignore", "pipe", "ignore"],
-          maxBuffer: 1024 * 1024 * 4,
-        },
-      ).trim();
+        }).trim();
+      }
+    } catch {
+      // Fall through to hw.model
     }
+
     if (!cpu) {
       try {
-        cpu = execSync("sysctl -n hw.model", {
+        cpu = execSync(`${SYSCTL} -n hw.model`, {
+          env: process.env,
           encoding: "utf-8",
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
@@ -226,7 +246,33 @@ function detectCpu(): { cpu: string; isAppleSilicon: boolean } {
         cpu = "Unknown CPU";
       }
     }
-    return { cpu, isAppleSilicon: cpu.includes("Apple M") };
+
+    let isAppleSilicon = false;
+    try {
+      isAppleSilicon =
+        execSync(`${SYSCTL} -n hw.optional.arm64`, {
+          env: process.env,
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim() === "1";
+    } catch {
+      // Fall through to uname
+    }
+
+    if (!isAppleSilicon) {
+      try {
+        isAppleSilicon =
+          execSync(`${UNAME} -m`, {
+            env: process.env,
+            encoding: "utf-8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim() === "arm64";
+      } catch {
+        // Keep false
+      }
+    }
+
+    return { cpu: cpu || "Unknown CPU", isAppleSilicon };
   }
 
   const cpuinfo = execSync("cat /proc/cpuinfo", { encoding: "utf-8" });
@@ -249,7 +295,7 @@ function detectGpu(): { gpuName: string | null; vramGB: number | null } {
   }
 
   try {
-    const raw = execSync("system_profiler SPDisplaysDataType", {
+    const raw = execSync(`${SYSTEM_PROFILER} SPDisplaysDataType`, {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 1024 * 1024 * 4,
@@ -293,7 +339,9 @@ function chooseRecommended(models: HardwareModelFit[]): HardwareInfo["recommende
 export function detectHardware(): HardwareInfo {
   const { totalRamGB, freeRamGB } = detectMemory();
   const { cpu, isAppleSilicon } = detectCpu();
-  const { gpuName, vramGB } = detectGpu();
+  const detectedGpu = detectGpu();
+  const gpuName = isAppleSilicon ? cpu : detectedGpu.gpuName;
+  const vramGB = isAppleSilicon ? totalRamGB : detectedGpu.vramGB;
   const models = CURATED_MODELS.map((model) => ({
     ...model,
     fit: scoreModelFit(totalRamGB, model.ramGB),

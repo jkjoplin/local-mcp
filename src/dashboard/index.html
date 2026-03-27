@@ -11,7 +11,7 @@
     <nav class="sidebar">
       <div class="logo">
         <h1><span>local</span>-mcp</h1>
-        <p>v3.0 — Local AI Router</p>
+        <p>v5.0 — Local AI Router</p>
       </div>
       <div class="nav-item active" data-page="status">● Status</div>
       <div class="nav-item" data-page="models">◆ Models</div>
@@ -111,6 +111,12 @@
           <p>Configure which model tier handles each task type</p>
         </div>
         <div class="card">
+          <div class="routing-toolbar">
+            <div class="routing-meta" id="routing-updated-at">Last updated: —</div>
+            <div class="routing-actions">
+              <button class="btn" id="reset-routing">Reset to defaults</button>
+            </div>
+          </div>
           <table class="routing-table">
             <thead><tr><th>Task</th><th>Model Tier</th><th>Description</th></tr></thead>
             <tbody id="routing-body"></tbody>
