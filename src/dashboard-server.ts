@@ -26,7 +26,7 @@ const MODEL_LIBRARY = [
     ram: "1 GB",
     ramGB: 1,
     speed: "215 t/s",
-    bestFor: "Ultra-fast: classification, extraction",
+    bestFor: "Ultra-fast: classification & extraction",
     tags: ["fast", "classification", "extraction"],
   },
   {
@@ -44,8 +44,9 @@ const MODEL_LIBRARY = [
     ram: "5.6 GB",
     ramGB: 5.6,
     speed: "52 t/s",
-    bestFor: "Reasoning, hard prompts",
-    tags: ["reasoning", "smart"],
+    recommended: true,
+    bestFor: "Reasoning & hard prompts",
+    tags: ["reasoning", "smart", "recommended"],
   },
   {
     id: "mlx-community/Qwen3-14B-4bit",
@@ -71,7 +72,7 @@ const MODEL_LIBRARY = [
     ram: "7.3 GB",
     ramGB: 7.3,
     speed: "30 t/s",
-    bestFor: "Vision, OCR",
+    bestFor: "Vision & OCR",
     tags: ["vision", "ocr", "multimodal"],
   },
   {
@@ -80,8 +81,8 @@ const MODEL_LIBRARY = [
     ram: "9.7 GB",
     ramGB: 9.7,
     speed: "26 t/s",
-    bestFor: "Deep reasoning",
-    tags: ["reasoning", "deep"],
+    bestFor: "Deep math & reasoning",
+    tags: ["reasoning", "math", "deep"],
   },
 ];
 

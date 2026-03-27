@@ -86,7 +86,7 @@ async function refreshModels() {
     const grid = document.getElementById('model-grid');
     grid.innerHTML = models.map(m => `
       <div class="model-card">
-        <div class="name">${m.name}</div>
+        <div class="name">${m.name}${m.recommended ? ' ⭐' : ''}</div>
         <div class="id">${m.id}</div>
         <div class="badges">
           <span class="badge ram">${m.ram} RAM</span>
@@ -94,7 +94,7 @@ async function refreshModels() {
           ${m.tags.map(t => `<span class="badge tag">${t}</span>`).join('')}
         </div>
         <div class="best-for">${m.bestFor}</div>
-        <button class="btn sm" data-copy="huggingface-cli download ${m.id}">Download Command</button>
+        <button class="btn sm" data-copy="huggingface-cli download ${m.id} --local-dir ~/.cache/huggingface/hub/${m.id.replace(/\//g, '--')}">Copy Download Command</button>
       </div>
     `).join('');
   } catch {
@@ -192,7 +192,8 @@ function updateWizardCommands() {
   const sel = document.getElementById('wizard-model-select');
   const modelId = sel.value;
   const dlBlock = document.getElementById('wizard-download-cmd');
-  const dlCmd = `huggingface-cli download ${modelId}`;
+  const safeName = modelId.replace(/\//g, '--');
+  const dlCmd = `huggingface-cli download ${modelId} --local-dir ~/.cache/huggingface/hub/${safeName}`;
   dlBlock.childNodes[0].textContent = dlCmd;
   dlBlock.querySelector('.copy-btn').dataset.copy = dlCmd;
 
@@ -232,15 +233,17 @@ async function refreshLogs() {
 }
 
 // --- Auto-refresh ---
-let statusInterval;
+// Auto-refresh intervals
 function startAutoRefresh() {
   refreshStatus();
-  statusInterval = setInterval(() => {
+  setInterval(() => {
     const statusPage = document.getElementById('page-status');
     if (statusPage.classList.contains('active')) refreshStatus();
+  }, 10000);
+  setInterval(() => {
     const logsPage = document.getElementById('page-logs');
     if (logsPage.classList.contains('active')) refreshLogs();
-  }, 10000);
+  }, 5000);
 }
 
 // --- Init ---

@@ -29,7 +29,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 1. ask_local
   server.tool(
     "ask_local",
-    "General-purpose prompt routed to a local LLM. Defaults to the smart model.",
+    "Send a general-purpose prompt to a local LLM running on this machine. Use this for any question or task that doesn't fit a more specific tool. Fast and free — no API costs. Defaults to the smart (reasoning-capable) model.",
     {
       prompt: z.string().describe("The prompt to send to the local LLM"),
       model: z
@@ -46,7 +46,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 2. reason
   server.tool(
     "reason",
-    "Deep reasoning prompt. Always uses the smart/reasoning model.",
+    "Deep step-by-step reasoning on a complex problem using a local LLM. Use this when you need careful analysis, multi-step logic, or thorough problem decomposition. Routes to the smart/reasoning model.",
     {
       prompt: z.string().describe("The reasoning task to send to the local LLM"),
     },
@@ -66,7 +66,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 3. classify
   server.tool(
     "classify",
-    "Fast classification of text into provided categories. Uses the fast model.",
+    "Classify text into one or more categories using a local LLM. Ultra-fast — runs on the fast model. Returns JSON with {result, confidence}. Use this for sentiment analysis, topic tagging, intent detection, content moderation, etc.",
     {
       text: z.string().describe("The text to classify"),
       categories: z.array(z.string()).describe("The list of possible categories"),
@@ -104,7 +104,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 4. summarize
   server.tool(
     "summarize",
-    "Summarize text using the fast model.",
+    "Summarize text using a local LLM. Supports bullet-point or paragraph format with optional word limit. Fast and free — use this for meeting notes, article summaries, changelog digests, etc.",
     {
       text: z.string().describe("The text to summarize"),
       format: z.enum(["bullet", "paragraph"]).optional().describe('Output format (default: "paragraph")'),
@@ -127,7 +127,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 5. code_review
   server.tool(
     "code_review",
-    "Review code for bugs, style, and performance issues.",
+    "Review code for bugs, performance issues, and style problems using a local LLM. Returns specific, actionable feedback with severity levels. Use this for quick code audits without sending code to external APIs.",
     {
       code: z.string().describe("The code to review"),
       language: z.string().optional().describe("Programming language"),
@@ -152,7 +152,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 6. explain
   server.tool(
     "explain",
-    "Explain code or a concept simply.",
+    "Explain code or a technical concept using a local LLM. Supports beginner/intermediate/expert depth levels. Use this to get clear explanations without API costs — great for unfamiliar codebases or concepts.",
     {
       content: z.string().describe("The code or concept to explain"),
       level: z
@@ -175,7 +175,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 7. extract
   server.tool(
     "extract",
-    "Extract structured data from text. Returns JSON.",
+    "Extract structured data from unstructured text using a local LLM. Describe the desired JSON schema in plain English and get clean JSON back. Use for parsing logs, emails, resumes, invoices, etc.",
     {
       text: z.string().describe("The text to extract data from"),
       schema: z.string().describe("JSON schema description in plain English"),
@@ -208,7 +208,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 8. translate
   server.tool(
     "translate",
-    "Translate text to a target language.",
+    "Translate text to any target language using a local LLM. Optionally preserves original formatting. Fast and private — text never leaves your machine.",
     {
       text: z.string().describe("The text to translate"),
       target_language: z.string().describe("Target language (e.g. 'Spanish', 'Japanese')"),
@@ -229,7 +229,7 @@ export function registerTools(server: McpServer, config: Config): void {
   // 9. diff_analysis
   server.tool(
     "diff_analysis",
-    "Analyze a git diff for risks, summary, and suggestions.",
+    "Analyze a git diff using a local LLM. Returns JSON with {summary, risks, suggestions}. Use this for pre-commit review, PR analysis, or understanding unfamiliar changes. Routes to the smart model.",
     {
       diff: z.string().describe("The git diff to analyze"),
       context: z.string().optional().describe("Additional context about the change"),

@@ -42,7 +42,7 @@ export function getStats(logPath: string): {
   const logs = readLogs(logPath, 100000);
   const totalRequests = logs.length;
   const totalTokens = logs.reduce((sum, l) => sum + l.tokens, 0);
-  // Assume $0.002 per 1k tokens (GPT-4 equivalent cost saved)
-  const estimatedCostSaved = (totalTokens / 1000) * 0.002;
+  // Assume $0.003 per 1k tokens (GPT-4 equivalent cost saved)
+  const estimatedCostSaved = (totalTokens / 1000) * 0.003;
   return { totalRequests, totalTokens, estimatedCostSaved };
 }
