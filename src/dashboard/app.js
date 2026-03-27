@@ -5,6 +5,8 @@ let currentConfig = null;
 let models = [];
 let healthHistory = { smart: [], fast: [] };
 let defaultTemplates = {};
+let hardwareState = null;
+let exportFormats = {};
 
 // --- Navigation ---
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -16,6 +18,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
     if (item.dataset.page === 'status') refreshStatus();
     if (item.dataset.page === 'logs') refreshLogs();
     if (item.dataset.page === 'models') refreshModels();
+    if (item.dataset.page === 'hardware') refreshHardware();
     if (item.dataset.page === 'routing') refreshRouting();
     if (item.dataset.page === 'templates') refreshTemplates();
   });
@@ -177,9 +180,10 @@ document.getElementById('test-run').addEventListener('click', async () => {
       document.getElementById('test-result').textContent = data.error;
     } else {
       document.getElementById('test-meta').innerHTML =
-        `<span class="badge speed">${data.latency}ms</span> ` +
+        `<span class="badge speed">${data.latencyMs}ms</span> ` +
         `<span class="badge ram">${data.tokens} tokens</span> ` +
-        `<span class="badge tag">${data.model?.split('/').pop() || '—'}</span>`;
+        `<span class="badge tag">${data.model?.split('/').pop() || '—'}</span>` +
+        ` <span class="badge tag">${data.tool}</span>`;
       document.getElementById('test-result').textContent = data.result;
     }
   } catch (err) {
@@ -217,6 +221,60 @@ async function refreshModels() {
     document.getElementById('model-grid').innerHTML = '<div class="card" style="color:var(--danger)">Failed to load models</div>';
   }
 }
+
+function fitBadgeClass(fit) {
+  return `fit-${fit}`;
+}
+
+function titleCaseFit(fit) {
+  return fit.replace('_', ' ');
+}
+
+async function refreshHardware() {
+  try {
+    const res = await fetch(API + '/api/hardware');
+    hardwareState = await res.json();
+    document.getElementById('hardware-stats').innerHTML = `
+      <div class="stat-box"><div class="value">${hardwareState.totalRamGB}</div><div class="label">Total RAM GB</div></div>
+      <div class="stat-box"><div class="value">${hardwareState.freeRamGB}</div><div class="label">Free RAM GB</div></div>
+      <div class="stat-box"><div class="value">${hardwareState.isAppleSilicon ? 'Yes' : 'No'}</div><div class="label">Apple Silicon</div></div>
+      <div class="stat-box"><div class="value">${hardwareState.vramGB ?? '—'}</div><div class="label">VRAM GB</div></div>
+    `;
+
+    document.getElementById('hardware-grid').innerHTML = hardwareState.models.map(model => `
+      <div class="hardware-card">
+        <div class="title">
+          <span>${model.name}${model.recommended ? ' ⭐' : ''}</span>
+          <span class="fit-badge ${fitBadgeClass(model.fit)}">${titleCaseFit(model.fit)}</span>
+        </div>
+        <div class="subtitle">${model.id}</div>
+        <div class="details">
+          <div><strong>RAM:</strong> ${model.ram}</div>
+          <div><strong>Speed:</strong> ${model.speedTps} t/s</div>
+          <div><strong>Tier:</strong> ${model.tier}</div>
+          <div><strong>Best for:</strong> ${model.bestFor}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const envSnippet =
+      `LOCAL_MCP_SMART_MODEL=${hardwareState.recommended.smart || ''}\n` +
+      `LOCAL_MCP_FAST_MODEL=${hardwareState.recommended.fast || ''}\n` +
+      `LOCAL_MCP_SMART_URL=http://localhost:8081\n` +
+      `LOCAL_MCP_FAST_URL=http://localhost:8083`;
+    document.getElementById('hardware-env').textContent = envSnippet;
+  } catch {
+    document.getElementById('hardware-stats').innerHTML =
+      '<div class="card" style="color:var(--danger)">Failed to load hardware data</div>';
+    document.getElementById('hardware-grid').innerHTML = '';
+  }
+}
+
+document.getElementById('copy-hardware-env').addEventListener('click', async () => {
+  const text = document.getElementById('hardware-env').textContent;
+  await navigator.clipboard.writeText(text);
+  toast('Copied .env snippet');
+});
 
 // --- Routing Page ---
 const TASK_DESCRIPTIONS = {
@@ -271,44 +329,12 @@ document.getElementById('save-routing').addEventListener('click', async () => {
 });
 
 // --- Export Config ---
-const EXPORT_FORMATS = {
-  claude: () => JSON.stringify({
-    mcpServers: {
-      "local-mcp": {
-        command: "npx",
-        args: ["local-mcp", "serve"]
-      }
-    }
-  }, null, 2),
-  codex: () => JSON.stringify({
-    mcpServers: {
-      "local-mcp": {
-        type: "stdio",
-        command: "npx",
-        args: ["local-mcp", "serve"]
-      }
-    }
-  }, null, 2),
-  cursor: () => JSON.stringify({
-    mcpServers: {
-      "local-mcp": {
-        command: "npx",
-        args: ["local-mcp", "serve"],
-        disabled: false
-      }
-    }
-  }, null, 2),
-  generic: () => JSON.stringify({
-    name: "local-mcp",
-    transport: "stdio",
-    command: "npx",
-    args: ["local-mcp", "serve"],
-    description: "Local LLM MCP server — route AI tasks to your own hardware"
-  }, null, 2)
-};
-
-document.getElementById('export-config').addEventListener('click', () => {
+document.getElementById('export-config').addEventListener('click', async () => {
   const modal = document.getElementById('export-modal');
+  if (!Object.keys(exportFormats).length) {
+    const res = await fetch(API + '/api/mcp-config');
+    exportFormats = await res.json();
+  }
   modal.style.display = 'flex';
   showExportFormat('claude');
 });
@@ -331,11 +357,10 @@ document.querySelectorAll('.modal-tab').forEach(tab => {
 
 function showExportFormat(format) {
   const code = document.getElementById('export-code');
-  const fn = EXPORT_FORMATS[format];
-  if (fn) {
-    code.textContent = fn();
-    highlightJson(code);
-  }
+  const data = exportFormats[format];
+  if (!data) return;
+  code.textContent = JSON.stringify(data, null, 2);
+  highlightJson(code);
 }
 
 function highlightJson(pre) {
@@ -501,3 +526,4 @@ function startAutoRefresh() {
 // --- Init ---
 startAutoRefresh();
 initWizardModels();
+refreshHardware();

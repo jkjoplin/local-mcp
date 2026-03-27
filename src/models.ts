@@ -20,13 +20,14 @@ interface ChatCompletionResponse {
 }
 
 export type { ModelTier };
+export type { ChatMessage };
 
-export async function chatCompletion(
+export async function chatCompletionDetailed(
   config: Config,
   tier: ModelTier,
   messages: ChatMessage[],
   toolName?: string,
-): Promise<string> {
+): Promise<{ content: string; tokens: number; model: string; latencyMs: number }> {
   const baseUrl = tier === "smart" ? config.smartUrl : config.fastUrl;
   const model = tier === "smart" ? config.smartModel : config.fastModel;
   const url = `${baseUrl}/v1/chat/completions`;
@@ -71,7 +72,7 @@ export async function chatCompletion(
       }, config.tracking.logPath);
     }
 
-    return content.trim();
+    return { content: content.trim(), tokens, model, latencyMs };
   } catch (err: unknown) {
     const latencyMs = Date.now() - startTime;
     if (config.tracking.enabled) {
@@ -104,6 +105,16 @@ export async function chatCompletion(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function chatCompletion(
+  config: Config,
+  tier: ModelTier,
+  messages: ChatMessage[],
+  toolName?: string,
+): Promise<string> {
+  const result = await chatCompletionDetailed(config, tier, messages, toolName);
+  return result.content;
 }
 
 function estimateTokens(messages: ChatMessage[], response: string): number {

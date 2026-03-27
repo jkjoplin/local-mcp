@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { ModelTier } from "./models.js";
 import { readLogs } from "./tracking.js";
 import { runBenchmark } from "./bench.js";
+import { detectHardware, FitLevel } from "./hardware.js";
 
 const config = loadConfig();
 
@@ -15,6 +16,7 @@ function usage(): void {
   local-mcp ask --fast "question"       Force fast model
   local-mcp ask --reason "problem"      Reasoning mode
   local-mcp bench                       Run benchmark suite
+  local-mcp fit                         Scan hardware and score curated models
   local-mcp status                      Print endpoint health
   local-mcp logs                        Tail the request log
   local-mcp dashboard                   Start web dashboard
@@ -184,6 +186,75 @@ function logsCommand(): void {
   }
 }
 
+function fitLabel(fit: FitLevel): string {
+  switch (fit) {
+    case "perfect":
+      return "\x1b[32m✅ perfect\x1b[0m";
+    case "good":
+      return "\x1b[33m🟡 good\x1b[0m";
+    case "marginal":
+      return "\x1b[38;5;214m🟠 marginal\x1b[0m";
+    case "too_large":
+      return "\x1b[31m⛔ too_large\x1b[0m";
+  }
+}
+
+function pad(value: string, width: number): string {
+  return value.length >= width ? value.slice(0, width) : value + " ".repeat(width - value.length);
+}
+
+function printFitTable(): void {
+  const hardware = detectHardware();
+  const widths = [42, 7, 8, 14, 7];
+  const topWidth = 77;
+  const topLine = `local-mcp fit — Hardware: ${hardware.cpu}  |  RAM: ${hardware.totalRamGB} GB  |  Free: ${hardware.freeRamGB} GB`;
+
+  console.log(`┌${"─".repeat(topWidth)}┐`);
+  console.log(`│  ${pad(topLine, topWidth - 2)}│`);
+  console.log(
+    `├${"─".repeat(widths[0] + 1)}┬${"─".repeat(widths[1] + 1)}┬${"─".repeat(widths[2] + 1)}┬${"─".repeat(widths[3] + 1)}┬${"─".repeat(widths[4] + 1)}┤`,
+  );
+  console.log(
+    `│ ${pad("Model", widths[0])}│ ${pad("RAM", widths[1])}│ ${pad("t/s", widths[2])}│ ${pad("Fit", widths[3])}│ ${pad("Tier", widths[4])}│`,
+  );
+  console.log(
+    `├${"─".repeat(widths[0] + 1)}┼${"─".repeat(widths[1] + 1)}┼${"─".repeat(widths[2] + 1)}┼${"─".repeat(widths[3] + 1)}┼${"─".repeat(widths[4] + 1)}┤`,
+  );
+
+  for (const model of hardware.models) {
+    const displayName = `${model.name}${model.recommended ? " ⭐" : ""}`;
+    console.log(
+      `│ ${pad(displayName, widths[0])}│ ${pad(model.ram.replace(" ", ""), widths[1])}│ ${pad(String(model.speedTps), widths[2])}│ ${pad(fitLabel(model.fit), widths[3])}│ ${pad(model.tier, widths[4])}│`,
+    );
+  }
+
+  console.log(
+    `└${"─".repeat(widths[0] + 1)}┴${"─".repeat(widths[1] + 1)}┴${"─".repeat(widths[2] + 1)}┴${"─".repeat(widths[3] + 1)}┴${"─".repeat(widths[4] + 1)}┘`,
+  );
+
+  console.log("\nRecommended for this machine:");
+  console.log(
+    `  Smart model:  ${hardware.recommended.smart ?? "None"}${hardware.recommended.smart ? " (best quality that fits well)" : ""}`,
+  );
+  console.log(
+    `  Fast model:   ${hardware.recommended.fast ?? "None"}${hardware.recommended.fast ? " (fastest)" : ""}`,
+  );
+
+  if (hardware.recommended.smart || hardware.recommended.fast) {
+    console.log("\nTo start servers:");
+    if (hardware.recommended.smart) {
+      console.log(
+        `  python3 -m mlx_lm server --model ${hardware.recommended.smart} --port 8081`,
+      );
+    }
+    if (hardware.recommended.fast) {
+      console.log(
+        `  python3 -m mlx_lm server --model ${hardware.recommended.fast} --port 8083`,
+      );
+    }
+  }
+}
+
 export async function runCli(args: string[]): Promise<boolean> {
   const command = args[0];
 
@@ -193,6 +264,9 @@ export async function runCli(args: string[]): Promise<boolean> {
       return true;
     case "bench":
       await runBenchmark(config);
+      return true;
+    case "fit":
+      printFitTable();
       return true;
     case "status":
       await statusCommand();

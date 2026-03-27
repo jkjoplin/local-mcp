@@ -1,21 +1,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { Config, ModelTier } from "./config.js";
-import { chatCompletion } from "./models.js";
-
-function tierFor(config: Config, task: string): ModelTier {
-  return (config.routing as Record<string, ModelTier>)[task] ?? "smart";
-}
+import { Config } from "./config.js";
+import { LocalToolName, prepareToolCall, runToolInput } from "./tool-runner.js";
 
 async function toolCall(
   config: Config,
-  tier: ModelTier,
-  messages: Array<{ role: "system" | "user"; content: string }>,
-  toolName: string,
+  toolName: LocalToolName,
+  input: string,
+  options?: Record<string, unknown>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
   try {
-    const text = await chatCompletion(config, tier, messages, toolName);
-    return { content: [{ type: "text" as const, text }] };
+    const result = await runToolInput(
+      config,
+      toolName,
+      input,
+      (options ?? {}) as never,
+    );
+    return { content: [{ type: "text" as const, text: result.result }] };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return {
@@ -38,8 +39,7 @@ export function registerTools(server: McpServer, config: Config): void {
         .describe('Model tier override: "fast" or "smart" (default: "smart")'),
     },
     async ({ prompt, model }) => {
-      const tier: ModelTier = model ?? tierFor(config, "ask");
-      return toolCall(config, tier, [{ role: "user", content: prompt }], "ask_local");
+      return toolCall(config, "ask_local", prompt, { model });
     },
   );
 
@@ -51,15 +51,7 @@ export function registerTools(server: McpServer, config: Config): void {
       prompt: z.string().describe("The reasoning task to send to the local LLM"),
     },
     async ({ prompt }) => {
-      return toolCall(
-        config,
-        tierFor(config, "reason"),
-        [
-          { role: "system", content: "Think step by step. Be thorough and precise in your reasoning." },
-          { role: "user", content: prompt },
-        ],
-        "reason",
-      );
+      return toolCall(config, "reason", prompt);
     },
   );
 
@@ -73,31 +65,7 @@ export function registerTools(server: McpServer, config: Config): void {
       multi: z.boolean().optional().describe("If true, allow multiple categories (default: false)"),
     },
     async ({ text, categories, multi }) => {
-      const multiLabel = multi ?? false;
-      const systemPrompt = multiLabel
-        ? `Classify the following text into one or more of these categories: ${categories.join(", ")}.\nRespond with ONLY a JSON object: {"result": ["cat1", "cat2"], "confidence": "high|medium|low"}`
-        : `Classify the following text into exactly one of these categories: ${categories.join(", ")}.\nRespond with ONLY a JSON object: {"result": "category", "confidence": "high|medium|low"}`;
-
-      try {
-        const raw = await chatCompletion(
-          config,
-          tierFor(config, "classify"),
-          [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: text },
-          ],
-          "classify",
-        );
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]) as { result: string | string[]; confidence?: string };
-          return { content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify({ result: raw.trim() }) }] };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-      }
+      return toolCall(config, "classify", text, { categories, multi });
     },
   );
 
@@ -111,16 +79,7 @@ export function registerTools(server: McpServer, config: Config): void {
       max_words: z.number().optional().describe("Approximate maximum word count"),
     },
     async ({ text, format, max_words }) => {
-      const fmt = format ?? "paragraph";
-      let sys = `Summarize the following text in ${fmt === "bullet" ? "bullet points" : "a concise paragraph"}.`;
-      if (max_words) sys += ` Keep it under ${max_words} words.`;
-      sys += " Respond with only the summary, no preamble.";
-      return toolCall(
-        config,
-        tierFor(config, "summarize"),
-        [{ role: "system", content: sys }, { role: "user", content: text }],
-        "summarize",
-      );
+      return toolCall(config, "summarize", text, { format, max_words });
     },
   );
 
@@ -137,15 +96,7 @@ export function registerTools(server: McpServer, config: Config): void {
         .describe('Review focus area (default: "all")'),
     },
     async ({ code, language, focus }) => {
-      const f = focus ?? "all";
-      const lang = language ? ` (${language})` : "";
-      const sys = `You are an expert code reviewer. Review the following${lang} code focusing on ${f === "all" ? "bugs, performance, and style" : f}. Provide specific, actionable feedback. Format: list issues with severity (critical/warning/info), line reference if possible, and suggested fix.`;
-      return toolCall(
-        config,
-        tierFor(config, "code_review"),
-        [{ role: "system", content: sys }, { role: "user", content: code }],
-        "code_review",
-      );
+      return toolCall(config, "code_review", code, { language, focus });
     },
   );
 
@@ -161,14 +112,7 @@ export function registerTools(server: McpServer, config: Config): void {
         .describe('Explanation depth (default: "intermediate")'),
     },
     async ({ content, level }) => {
-      const l = level ?? "intermediate";
-      const sys = `Explain the following clearly for a ${l}-level audience. Be concise but thorough. Use examples where helpful.`;
-      return toolCall(
-        config,
-        tierFor(config, "explain"),
-        [{ role: "system", content: sys }, { role: "user", content: content }],
-        "explain",
-      );
+      return toolCall(config, "explain", content, { level });
     },
   );
 
@@ -181,27 +125,7 @@ export function registerTools(server: McpServer, config: Config): void {
       schema: z.string().describe("JSON schema description in plain English"),
     },
     async ({ text, schema }) => {
-      const sys = `Extract structured data from the following text. Output ONLY valid JSON matching this schema: ${schema}. No other text.`;
-      try {
-        const raw = await chatCompletion(
-          config,
-          tierFor(config, "extract"),
-          [
-            { role: "system", content: sys },
-            { role: "user", content: text },
-          ],
-          "extract",
-        );
-        const jsonMatch = raw.match(/[\[{][\s\S]*[\]}]/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return { content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }] };
-        }
-        return { content: [{ type: "text" as const, text: raw }] };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-      }
+      return toolCall(config, "extract", text, { schema });
     },
   );
 
@@ -215,14 +139,10 @@ export function registerTools(server: McpServer, config: Config): void {
       preserve_formatting: z.boolean().optional().describe("Preserve original formatting (default: true)"),
     },
     async ({ text, target_language, preserve_formatting }) => {
-      const pf = preserve_formatting ?? true;
-      const sys = `Translate the following text to ${target_language}.${pf ? " Preserve the original formatting, line breaks, and structure." : ""} Output only the translation, no preamble.`;
-      return toolCall(
-        config,
-        tierFor(config, "translate"),
-        [{ role: "system", content: sys }, { role: "user", content: text }],
-        "translate",
-      );
+      return toolCall(config, "translate", text, {
+        target_language,
+        preserve_formatting,
+      });
     },
   );
 
@@ -235,28 +155,7 @@ export function registerTools(server: McpServer, config: Config): void {
       context: z.string().optional().describe("Additional context about the change"),
     },
     async ({ diff, context }) => {
-      const ctx = context ? `\nContext: ${context}` : "";
-      const sys = `Analyze the following git diff.${ctx} Respond with ONLY a JSON object: {"summary": "brief summary of changes", "risks": ["list of potential risks"], "suggestions": ["list of improvement suggestions"]}`;
-      try {
-        const raw = await chatCompletion(
-          config,
-          tierFor(config, "diff_analysis"),
-          [
-            { role: "system", content: sys },
-            { role: "user", content: diff },
-          ],
-          "diff_analysis",
-        );
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return { content: [{ type: "text" as const, text: JSON.stringify(parsed, null, 2) }] };
-        }
-        return { content: [{ type: "text" as const, text: raw }] };
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true };
-      }
+      return toolCall(config, "diff_analysis", diff, { context });
     },
   );
 }

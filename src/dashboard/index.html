@@ -15,6 +15,7 @@
       </div>
       <div class="nav-item active" data-page="status">● Status</div>
       <div class="nav-item" data-page="models">◆ Models</div>
+      <div class="nav-item" data-page="hardware">◈ Hardware</div>
       <div class="nav-item" data-page="routing">⇄ Routing</div>
       <div class="nav-item" data-page="wizard">⚡ Setup Wizard</div>
       <div class="nav-item" data-page="logs">▤ Logs</div>
@@ -68,7 +69,7 @@
               </select>
               <button class="btn primary" id="test-run">Run</button>
             </div>
-            <textarea id="test-input" rows="3" placeholder="Enter your prompt or input..."></textarea>
+            <textarea id="test-input" rows="3" placeholder="Enter your prompt or input...">The server is returning 500 errors</textarea>
             <div id="test-output" class="test-output" style="display:none;">
               <div id="test-meta" class="test-meta"></div>
               <pre id="test-result"></pre>
@@ -86,6 +87,23 @@
         <div class="model-grid" id="model-grid"></div>
       </div>
 
+      <!-- HARDWARE PAGE -->
+      <div class="page" id="page-hardware">
+        <div class="section-header">
+          <h1>Hardware</h1>
+          <p>Detected machine specs and which curated models fit cleanly</p>
+        </div>
+        <div class="stats-row" id="hardware-stats"></div>
+        <div class="hardware-grid" id="hardware-grid"></div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Recommended Config</h2>
+            <button class="btn sm" id="copy-hardware-env">Copy</button>
+          </div>
+          <pre class="code-block hardware-env" id="hardware-env"></pre>
+        </div>
+      </div>
+
       <!-- ROUTING PAGE -->
       <div class="page" id="page-routing">
         <div class="section-header">
@@ -98,7 +116,7 @@
             <tbody id="routing-body"></tbody>
           </table>
           <div style="margin-top: 16px; display:flex; justify-content:space-between; align-items:center;">
-            <button class="btn" id="export-config">Export Config</button>
+            <button class="btn" id="export-config">Export for MCP clients</button>
             <button class="btn primary" id="save-routing">Save Configuration</button>
           </div>
         </div>
@@ -189,6 +207,12 @@ export LOCAL_MCP_SMART_URL=http://localhost:8081<button class="btn sm copy-btn" 
         <button class="modal-tab" data-format="codex">Codex</button>
         <button class="modal-tab" data-format="cursor">Cursor</button>
         <button class="modal-tab" data-format="generic">Generic</button>
+      </div>
+      <div class="modal-tab-panels">
+        <div class="modal-tab-panel" id="export-panel-claude"></div>
+        <div class="modal-tab-panel" id="export-panel-codex" style="display:none;"></div>
+        <div class="modal-tab-panel" id="export-panel-cursor" style="display:none;"></div>
+        <div class="modal-tab-panel" id="export-panel-generic" style="display:none;"></div>
       </div>
       <pre class="modal-code" id="export-code"></pre>
       <div style="text-align:right;margin-top:12px;">

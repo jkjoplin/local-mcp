@@ -4,10 +4,11 @@ import { join, extname } from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { Config, getConfigFile, updateConfigFile, ConfigFile, ModelTier } from "./config.js";
+import { Config, getConfigFile, updateConfigFile, ConfigFile } from "./config.js";
 import { readLogs, getStats } from "./tracking.js";
-import { chatCompletion } from "./models.js";
 import { loadTemplates, DEFAULT_TEMPLATES } from "./templates.js";
+import { CURATED_MODELS, detectHardware } from "./hardware.js";
+import { runToolInput, VALID_TOOLS, LocalToolName } from "./tool-runner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,97 +20,6 @@ const MIME_TYPES: Record<string, string> = {
   ".json": "application/json",
   ".svg": "image/svg+xml",
   ".png": "image/png",
-};
-
-const MODEL_LIBRARY = [
-  {
-    id: "mlx-community/Qwen2.5-1.5B-Instruct-4bit",
-    name: "Qwen 2.5 1.5B",
-    ram: "1 GB",
-    ramGB: 1,
-    speed: "215 t/s",
-    bestFor: "Ultra-fast: classification & extraction",
-    tags: ["fast", "classification", "extraction"],
-  },
-  {
-    id: "mlx-community/Qwen2.5-7B-Instruct-4bit",
-    name: "Qwen 2.5 7B",
-    ram: "4.4 GB",
-    ramGB: 4.4,
-    speed: "60 t/s",
-    bestFor: "General Q&A, structured output",
-    tags: ["general", "qa", "structured"],
-  },
-  {
-    id: "mlx-community/Qwen3.5-9B-MLX-4bit",
-    name: "Qwen 3.5 9B",
-    ram: "5.6 GB",
-    ramGB: 5.6,
-    speed: "52 t/s",
-    recommended: true,
-    bestFor: "Reasoning & hard prompts",
-    tags: ["reasoning", "smart", "recommended"],
-  },
-  {
-    id: "mlx-community/Qwen3-14B-4bit",
-    name: "Qwen 3 14B",
-    ram: "8.4 GB",
-    ramGB: 8.4,
-    speed: "29 t/s",
-    bestFor: "Mid-tier reasoning",
-    tags: ["reasoning", "mid-tier"],
-  },
-  {
-    id: "mlx-community/Qwen3.5-27B-4bit",
-    name: "Qwen 3.5 27B",
-    ram: "15.3 GB",
-    ramGB: 15.3,
-    speed: "16 t/s",
-    bestFor: "Max quality on-device",
-    tags: ["quality", "max"],
-  },
-  {
-    id: "mlx-community/gemma-3-12b-it-4bit",
-    name: "Gemma 3 12B",
-    ram: "7.3 GB",
-    ramGB: 7.3,
-    speed: "30 t/s",
-    bestFor: "Vision & OCR",
-    tags: ["vision", "ocr", "multimodal"],
-  },
-  {
-    id: "mlx-community/Phi-4-reasoning-plus-4bit",
-    name: "Phi-4 Reasoning Plus",
-    ram: "9.7 GB",
-    ramGB: 9.7,
-    speed: "26 t/s",
-    bestFor: "Deep math & reasoning",
-    tags: ["reasoning", "math", "deep"],
-  },
-];
-
-const VALID_TOOLS = [
-  "ask_local",
-  "reason",
-  "classify",
-  "summarize",
-  "code_review",
-  "explain",
-  "extract",
-  "translate",
-  "diff_analysis",
-];
-
-const TOOL_TIER_MAP: Record<string, string> = {
-  ask_local: "ask",
-  reason: "reason",
-  classify: "classify",
-  summarize: "summarize",
-  code_review: "code_review",
-  explain: "explain",
-  extract: "extract",
-  translate: "translate",
-  diff_analysis: "diff_analysis",
 };
 
 async function checkEndpointHealth(
@@ -167,82 +77,51 @@ function json(res: ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function buildTestMessages(
-  tool: string,
-  input: string,
-): { messages: Array<{ role: "system" | "user"; content: string }>; tier: string } {
-  const tierKey = TOOL_TIER_MAP[tool] ?? "ask";
-  switch (tool) {
-    case "reason":
-      return {
-        messages: [
-          { role: "system", content: "Think step by step. Be thorough and precise in your reasoning." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "classify":
-      return {
-        messages: [
-          { role: "system", content: "Classify the following text. Respond with ONLY a JSON object: {\"result\": \"category\", \"confidence\": \"high|medium|low\"}" },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "summarize":
-      return {
-        messages: [
-          { role: "system", content: "Summarize the following text in a concise paragraph. Respond with only the summary." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "code_review":
-      return {
-        messages: [
-          { role: "system", content: "You are an expert code reviewer. Review the following code for bugs, performance, and style. Provide specific, actionable feedback." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "explain":
-      return {
-        messages: [
-          { role: "system", content: "Explain the following clearly for an intermediate-level audience. Be concise but thorough." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "extract":
-      return {
-        messages: [
-          { role: "system", content: "Extract structured data from the following text. Output ONLY valid JSON." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "translate":
-      return {
-        messages: [
-          { role: "system", content: "Translate the following text. Output only the translation." },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    case "diff_analysis":
-      return {
-        messages: [
-          { role: "system", content: "Analyze this git diff. Respond with ONLY a JSON object: {\"summary\": \"...\", \"risks\": [...], \"suggestions\": [...]}" },
-          { role: "user", content: input },
-        ],
-        tier: tierKey,
-      };
-    default:
-      return {
-        messages: [{ role: "user", content: input }],
-        tier: tierKey,
-      };
+function getServerEntryPath(): string {
+  const builtPath = join(__dirname, "index.js");
+  if (existsSync(builtPath)) {
+    return builtPath;
   }
+  return join(__dirname, "..", "dist", "index.js");
+}
+
+function getMcpConfigs(): Record<string, unknown> {
+  const serverPath = getServerEntryPath();
+  return {
+    claude: {
+      mcpServers: {
+        "local-mcp": {
+          command: "node",
+          args: [serverPath, "serve"],
+        },
+      },
+    },
+    codex: {
+      mcpServers: {
+        "local-mcp": {
+          type: "stdio",
+          command: "node",
+          args: [serverPath, "serve"],
+        },
+      },
+    },
+    cursor: {
+      mcpServers: {
+        "local-mcp": {
+          command: "node",
+          args: [serverPath, "serve"],
+          disabled: false,
+        },
+      },
+    },
+    generic: {
+      name: "local-mcp",
+      transport: "stdio",
+      command: "node",
+      args: [serverPath, "serve"],
+      description: "Local LLM MCP server — route AI tasks to your own hardware",
+    },
+  };
 }
 
 export function startDashboard(config: Config): void {
@@ -301,11 +180,19 @@ export function startDashboard(config: Config): void {
         }
 
         if (url === "/api/models" && method === "GET") {
-          return json(res, MODEL_LIBRARY);
+          return json(res, CURATED_MODELS);
         }
 
         if (url === "/api/stats" && method === "GET") {
           return json(res, getStats(config.tracking.logPath));
+        }
+
+        if (url === "/api/hardware" && method === "GET") {
+          return json(res, detectHardware());
+        }
+
+        if (url === "/api/mcp-config" && method === "GET") {
+          return json(res, getMcpConfigs());
         }
 
         if (url === "/api/templates" && method === "GET") {
@@ -324,7 +211,15 @@ export function startDashboard(config: Config): void {
 
         if (url === "/api/test" && method === "POST") {
           const body = await readBody(req);
-          const { tool, input } = JSON.parse(body) as { tool: string; input: string };
+          const {
+            tool,
+            input,
+            options = {},
+          } = JSON.parse(body) as {
+            tool: LocalToolName;
+            input: string;
+            options?: Record<string, unknown>;
+          };
 
           if (!VALID_TOOLS.includes(tool)) {
             return json(res, { error: `Invalid tool: ${tool}` }, 400);
@@ -333,19 +228,19 @@ export function startDashboard(config: Config): void {
             return json(res, { error: "Input is required" }, 400);
           }
 
-          const { messages, tier: tierKey } = buildTestMessages(tool, input);
-          const tier: ModelTier =
-            (config.routing as Record<string, ModelTier>)[tierKey] ?? "smart";
-          const model = tier === "smart" ? config.smartModel : config.fastModel;
-
-          const start = Date.now();
           try {
-            const result = await chatCompletion(config, tier, messages, tool);
-            const latency = Date.now() - start;
-            return json(res, { result, latency, model, tool, tokens: Math.ceil(result.length / 4) });
+            const start = Date.now();
+            const result = await runToolInput(config, tool, input, options);
+            return json(res, {
+              result: result.result,
+              latencyMs: Date.now() - start,
+              tokens: result.tokens,
+              model: result.model,
+              tool,
+            });
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            return json(res, { error: message, tool, model }, 500);
+            return json(res, { error: message, tool }, 500);
           }
         }
 
